@@ -14,12 +14,13 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        # Docker Hub image
         image: postgres:16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: mysecretpassword
           POSTGRES_DB: simple_bank
+        ports:
+          - 5432:5432
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -43,7 +44,19 @@ jobs:
       - name: Verify migrate install
         run: migrate -version
 
+      - name: Wait for PostgreSQL to be ready
+        run: |
+          until pg_isready -h localhost -p 5432 -U postgres; do
+            echo "Waiting for PostgreSQL..."
+            sleep 1
+          done
+
       - name: Run migrations
+        env:
+          DB_SOURCE: postgresql://postgres:mysecretpassword@localhost:5432/simple_bank?sslmode=disable
         run: make migrateup
-      - name: Test
+
+      - name: Run tests
+        env:
+          DB_SOURCE: postgresql://postgres:mysecretpassword@localhost:5432/simple_bank?sslmode=disable
         run: make test
