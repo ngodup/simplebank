@@ -1,0 +1,57 @@
+
+Lecture Video 15 : Mock DB for testing HTTP API
+-----------------------------------------------
+## Mock Testing Explained we have done in api/accout_test.go 
+
+### What is Mock Testing?
+
+Mock testing is a technique used in unit testing. It involves creating "mock" or "fake" objects that simulate the behavior of real, complex dependencies. In this project, `account_test.go` uses mock testing to test the API handlers in `account.go`.
+
+Instead of interacting with a real database, the tests use a **mock `Store`**. This mock `Store` is a simulated object that we can program to behave in specific ways for each test case. For example, we can tell the mock to:
+
+1.  Return a specific account when `GetAccount` is called.
+2.  Return a `sql.ErrNoRows` error to simulate a "not found" scenario.
+3.  Return any other type of error to test the API's error handling.
+
+This is done using `go.uber.org/mock/mockgen`, which automatically generates the necessary mock code from the `db.Store` interface.
+
+### Is Mock Testing Used in Production Projects?
+
+**Yes, absolutely.** Mocking is a standard and essential practice in professional software development for several key reasons:
+
+1.  **Isolation**: It allows you to test a single unit of code (like an API handler) in complete isolation. If a test fails, you know the bug is in the code you are testing, not in its dependencies (like the database).
+2.  **Speed**: Mock tests are extremely fast because they don't involve slow operations like network calls or database connections. This allows developers to run hundreds or thousands of tests in seconds, providing rapid feedback.
+3.  **Control & Predictability**: Mocks give you full control over the test environment. You can easily simulate edge cases and error conditions (e.g., database connection failure, disk full) that are often very difficult to reproduce with real systems.
+4.  **Development in Parallel**: Frontend and backend teams can work independently. A frontend team can test its code against a mock API server before the real backend is even built.
+
+While mock testing is crucial for *unit tests*, a comprehensive testing strategy also includes *integration tests*, where the API is tested with a real, running database to ensure all the parts of the system work together correctly.
+
+----************************************************************************---
+
+Lecture video 16 : Implement Transfer money api with a custom validator
+----------------------------------------------------------------------
+
+## Session Notes: Money Transfer API & Custom Validation
+
+This session focused on implementing the core money transfer API and improving data validation within the application.
+
+### 1. Money Transfer API Endpoint
+
+- **New Feature**: Created a new API endpoint `POST /transfers` to handle money transfer requests.
+- **Implementation**: The `createTransfer` function in `api/transfer.go` contains the logic for processing transfers.
+
+### 2. Custom Validation for Currencies
+
+To make the system more robust and scalable, we moved from a hardcoded list of currencies to a custom validation rule.
+
+- **Problem**: The currency validation was previously defined directly in the model struct (`binding:"required,oneof=USD EUR"`). This is not ideal because:
+    - It's not easily reusable across different structs.
+    - Adding new currencies requires changing struct tags in multiple places.
+
+- **Solution**: A custom validator was implemented.
+    1.  **`validator.go`**: A new `validCurrency` function was created to check if a given currency is supported.
+    2.  **`server.go`**: This new validator was registered with Gin's validator engine at startup, linking it to the custom tag `currency`.
+    3.  **`account.go`**: The `createAccountRequest` struct was updated to use the new custom rule: `binding:"required,currency"`.
+
+- **Benefit**: This change centralizes the currency validation logic, making it easier to maintain and update. We can now reuse the `currency`
+----************************************************************************---
