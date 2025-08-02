@@ -23,7 +23,7 @@ func (server *Server) createAccount(ctx *gin.Context) {
 	arg := db.CreateAccountParams{
 		Owner:    req.Owner,
 		Balance:  0,
-		Currency: req.Currency,
+		Currency: "USD",
 	}
 
 	account, err := server.store.CreateAccount(ctx, arg)
