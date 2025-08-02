@@ -55,3 +55,59 @@ To make the system more robust and scalable, we moved from a hardcoded list of c
 
 - **Benefit**: This change centralizes the currency validation logic, making it easier to maintain and update. We can now reuse the `currency`
 ----************************************************************************---
+
+Lesson Video 17 : Add users table with unique & foreign key contstrants
+-----------------------------------------------------------------------
+
+## Session Notes: Adding Users table and Refining Database Schema
+
+This session was a major step in the project's development. We introduced a `users` table, established a proper relationship between users and their accounts, and improved the `Makefile` for more controlled database migrations.
+
+### 1. Creating the `users` Table
+
+We created a new migration file (`000002_add_users.up.sql`) to define the schema for our `users` table.
+
+**What:** The `users` table was created with the following columns:
+
+- `username`: A unique primary key to identify each user.
+- `hashed_password`: To securely store user passwords.
+- `full_name`: The user's full name.
+- `email`: A unique email address for each user.
+- `password_change_at`: To track when the password was last changed (important for security).
+- `created_at`: A timestamp to record when the user account was created.
+
+**Why:** This is a fundamental step towards building a real application. By creating a `users` table, we can now properly associate accounts with specific users, which is essential for implementing authentication and authorization.
+
+### 2. Linking Users and Accounts with Constraints
+
+After creating the `users` table, we established a formal link between it and the existing `accounts` table.
+
+**What & How:**
+
+1.  **Foreign Key:** We added a foreign key constraint to the `accounts` table. This constraint ensures that every `owner` value in the `accounts` table *must* correspond to a valid `username` in the `users` table.
+
+    ```sql
+    ALTER TABLE "accounts" ADD FOREIGN KEY ("owner") REFERENCES "users" ("username");
+    ```
+
+2.  **Unique Constraint:** We added a unique constraint to the `accounts` table to prevent a single user from having multiple accounts with the same currency.
+
+    ```sql
+    ALTER TABLE "accounts" ADD CONSTRAINT "owner_currency_key" UNIQUE ("owner", "currency");
+    ```
+
+**Why:**
+
+- The **foreign key** enforces data integrity. It makes it impossible to have an account without a valid owner, which prevents orphaned data and ensures the database remains consistent.
+- The **unique constraint** is a business rule that prevents duplicate accounts for the same user and currency, which is a common requirement in banking applications.
+
+### 3. Improving the `Makefile`
+
+To make working with these migrations easier and safer, we added two new commands to the `Makefile`:
+
+- `migrateup1`: Applies a single "up" migration.
+- `migratedown1`: Reverts a single "down" migration.
+
+**Why:** These commands give us the precision to test and debug each migration file individually, which is much safer than applying or reverting all migrations at once.
+
+----************************************************************************---
