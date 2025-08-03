@@ -111,3 +111,32 @@ To make working with these migrations easier and safer, we added two new command
 **Why:** These commands give us the precision to test and debug each migration file individually, which is much safer than applying or reverting all migrations at once.
 
 ----************************************************************************---
+
+Lesson Video 18 : How to handle DB errors in Golang Correctly
+-----------------------------------------------------------------------
+
+What we did:
+- Implemented user creation and retrieval functionality.
+- Added password hashing and verification using bcrypt.
+- Updated the accounts API to handle potential database constraint violations (foreign key, unique).
+- Added comprehensive tests for the new user functionality and the accounts API.
+
+What we learned:
+- How to add a new database table and generate corresponding Go code with sqlc.
+- How to implement user authentication features, including password hashing with bcrypt.
+- How to handle specific database errors in the API layer to provide more meaningful error messages to the client.
+- The importance of testing new functionality thoroughly, including unit tests for database queries and API endpoints.
+
+
+
+Lesson Video 18 : 
+-----------------------------------------------------------------------
+
+
+
+
+Lesson Video 18 : 
+-----------------------------------------------------------------------
+
+Lesson Video 18 : 
+-----------------------------------------------------------------------
