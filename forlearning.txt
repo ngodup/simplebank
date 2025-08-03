@@ -176,8 +176,114 @@ Step 7. Manual Testing (Postman)**
 
 ____________________________________________*****************************__________________________________
 
-Lesson Video 18 : 
+Lesson Video 20 : 20. How to write stronger unit tests with a custom gomock matcher
 -----------------------------------------------------------------------
+### Tutorial: Unit Testing with Custom Gomock Matchers for Hashed Passwords
+
+### Advanced Unit Testing: Why and How to Build Custom Gomock Matchers in Go
+
+This tutorial explores a common challenge in unit testing—verifying arguments that are dynamically generated or transformed—and provides a powerful solution using custom `gomock` matchers.
+
+**1. The Goal: Writing Tests We Can Trust**
+
+Our goal is to write a unit test for our `createUser` API. A good test should fail if the implementation is wrong and pass if it's correct. However, standard testing tools sometimes fall short.
+
+**2. The Limitations of Standard Matchers**
+
+When testing our user create API, we need to mock the `store.CreateUser` database call. The challenge lies in verifying the `params` argument passed to it.
+
+**Scenario A: The `gomock.Any()` Trap**
+
+Initially, we might use `gomock.Any()`: in user_test.go for createUser case ok
+
+```go
+store.EXPECT().CreateUser(gomock.Any(), gomock.Any())
+```
+
+This is too weak and can hide critical bugs:
+
+- **Issue #1 (The Empty User Bug)**: If a developer mistakenly adds `arg = db.CreateUserParams{}` in api/user.go in the handler, 
+the API would create an empty user in the database. The test with `gomock.Any()` would still **pass**, failing to catch this major bug.
+- **Issue #2 (The Constant Password Bug)**: If the handler was incorrectly hardcoded to use a constant password (`util.HashPassword("some-string")`) instead of the user's input, `gomock.Any()` would also allow the test to **pass**, completely missing the security flaw.
+
+**Scenario B: The `gomock.Eq()` Dead End**
+
+The next logical step is to use `gomock.Eq()` for a precise match. However, this approach also fails, but for a different reason.
+
+```go
+// In the test:
+hashedPassword, _ := util.HashPassword(password)
+arg := db.CreateUserParams{ HashedPassword: hashedPassword, ... }
+store.EXPECT().CreateUser(gomock.Any(), gomock.Eq(arg))
+```
+
+This test will **always fail**. The `bcrypt` algorithm uses a random salt, meaning `util.HashPassword()` produces a *different* hash every time, even with the same input. 
+The hash generated in the test will never equal the one generated in the API handler.
+
+**3. When Are Custom Matchers Needed? (Generalizing the Problem)**
+
+This isn't just about passwords. A custom matcher is the right tool whenever you need to test a function argument that is:
+
+-   **Non-Deterministic**: Like a hashed password, where the output changes on every call.
+-   **Dynamically Generated**: Such as a struct field that gets a new `UUID` or a `CreatedAt`/`UpdatedAt` timestamp assigned inside the function you're testing.
+-   **Requires Complex Validation**: When simple equality isn't enough, and you need to run custom logic to verify an argument's correctness.
+
+**4. The Solution: Crafting a Custom Matcher**
+
+We solve this by creating a matcher that understands our specific requirements.
+
+- **Step 1: Define the Matcher Struct**
+  It holds the expected argument and the original plain-text password needed for verification.
+  ```go
+  type eqCreateUserParamsMatcher struct {
+      arg      db.CreateUserParams
+      password string
+  }
+  ```
+
+- **Step 2: Implement the `Matches()` Method**
+  This is the core logic where we compare the actual argument (`x`) with our expectations.
+  ```go
+  func (e eqCreateUserParamsMatcher) Matches(x interface{}) bool {
+      arg, ok := x.(db.CreateUserParams)
+      if !ok { return false } // Type assertion failed
+
+      // 1. Custom Logic: Check the password first.
+      err := util.CheckPassword(e.password, arg.HashedPassword)
+      if err != nil { return false } // Passwords don't match
+
+      // 2. Prepare for DeepEqual: Since the hash is valid, we copy it to our expected arg.
+      e.arg.HashedPassword = arg.HashedPassword
+
+      // 3. Standard Logic: Compare the rest of the fields.
+      return reflect.DeepEqual(e.arg, arg)
+  }
+  ```
+
+- **Step 3: Implement the `String()` Method**
+  This provides a clear error message if the test fails.
+
+- **Step 4: Create a Helper Function**
+  This makes the matcher easy and clean to use in our tests.
+  ```go
+  func EqCreateUserParams(arg db.CreateUserParams, password string) gomock.Matcher {
+      return eqCreateUserParamsMatcher{arg, password}
+  }
+  ```
+
+**5. The Final, Robust Test**
+
+Now, our test is both strong and precise. It correctly verifies the behavior of our API without being brittle.
+
+```go
+store.EXPECT().
+    CreateUser(gomock.Any(), EqCreateUserParams(arg, password)).
+    Times(1).
+    Return(user, nil)
+```
+
+This test will now correctly fail if the handler creates an empty user or uses the wrong password, and it will pass when the implementation
+ is correct. By building a custom matcher, we have created a truly reliable unit test.
 
 Lesson Video 18 : 
 -----------------------------------------------------------------------

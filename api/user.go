@@ -45,6 +45,9 @@ func (server *Server) createUser(ctx *gin.Context) {
 		Email:          req.Email,
 	}
 
+	// arg = db.CreateUserParams{} this pass the user create test because of CreateUser(gomock.Any(), gomock.Any()).
+	// the second argument make it week or failing matcher
+
 	user, err := server.store.CreateUser(ctx, arg)
 	if err != nil {
 		if pqErr, ok := err.(*pq.Error); ok {
