@@ -285,5 +285,81 @@ store.EXPECT().
 This test will now correctly fail if the handler creates an empty user or uses the wrong password, and it will pass when the implementation
  is correct. By building a custom matcher, we have created a truly reliable unit test.
 
-Lesson Video 18 : 
+
+____________________________________________*****************************__________________________________
+
+
+
+Lesson Video 21 : 21. Why PASETO is better than JWT for token-based authentication?
 -----------------------------------------------------------------------
+### Summary of Token-Based Authentication: JWT vs. PASETO
+
+This document summarizes the key concepts of token-based authentication, focusing on the differences, vulnerabilities, and 
+security models of JSON Web Tokens (JWT) and Platform-Agnostic Security Tokens (PASETO).
+
+---
+
+### 1. Token-Based Authentication Flow
+
+1.  **Login:** The client sends credentials (e.g., username/password) to the server.
+2.  **Token Generation:** The server validates the credentials, creates a signed access token, and sends it back to the client.
+3.  **Authenticated Requests:** The client includes the access token in the authorization header of subsequent requests to access protected resources.
+4.  **Verification:** The server verifies the token's signature and validity for each request before authorizing it. The token is typically valid for a limited time.
+
+---
+
+### 2. JSON Web Token (JWT)
+
+JWT is a widely used standard for creating access tokens. It hase two types symmetric and asymmetric.
+
+**Structure:** A JWT consists of three Base64-encoded parts separated by dots: `header.payload.signature`.
+*   **Header:** Contains metadata, including the token type (`JWT`) and the signing algorithm (`alg`), e.g., `HS256` or `RS256`.
+*   **Payload:** Contains claims, which are statements about an entity (typically the user) and additional data like expiration time (`exp`). **The payload is only encoded, not encrypted, and is publicly readable.**
+*   **Signature:** Used to verify the integrity of the token. It is created by signing the header and payload with a secret (for symmetric algorithms) or a private key (for asymmetric algorithms).
+
+**Key Security Context (Vulnerabilities):**
+*   **Algorithm Flexibility is a Weakness:** JWT allows developers to choose from many signing algorithms, including some known to be weak (e.g., RSA with PKCSv1.5 is susceptible to padding oracle attacks).
+*   **`alg: "none"` in header. Attack:** A critical historical vulnerability where an attacker could set the algorithm in the header to `"none"`, causing some libraries to bypass signature verification entirely.
+*   **Algorithm Confusion Attack (Key Confusion):** This is a more dangerous attack. If a server uses an asymmetric algorithm (e.g., RS256) where the public key is known, an attacker can:
+    1.  Forge a token with a malicious payload.
+    2.  Change the `alg` in the header to a symmetric one, like `HS256`.
+    3.  Sign the token using the server's **public key** as the secret.
+    4.  The server, seeing `alg: "HS256"`, treats the public key as the symmetric secret and successfully validates the token, granting the attacker access.
+*   **Mitigation:** A critical server-side check is required to ensure the `alg` from the token header matches the expected algorithm before verification.
+
+---
+
+### 3. PASETO (Platform-Agnostic Security Token)
+
+PASETO was designed as a secure-by-default alternative to JWT, fixing its fundamental design flaws.
+
+**Core Principles:**
+*   **No Algorithm Choice:** PASETO uses fixed, strong cryptographic suites based on its version. Developers do not choose the algorithm, eliminating the risk of selecting a weak one.
+*   **No Algorithm in Header:** The token's structure itself defines the cryptographic operations, making algorithm confusion attacks impossible.
+*   **Authenticated Encryption:** All parts of the token are authenticated, preventing tampering.
+
+**Structure:** `version.purpose.payload(.footer)`
+*   **Version:** Specifies the PASETO version (e.g., `v2`).
+*   **Purpose:** Defines the use case and the cryptography applied:
+    *   `local`: For internal services. Uses a symmetric key. **The payload is encrypted (AEAD), not just encoded.**
+    *   `public`: For external services. Uses an asymmetric key pair. The payload is encoded and digitally signed.
+*   **Payload:** The main content. It is either encrypted (`local`) or signed (`public`).
+*   **Footer (Optional):** Public, unencrypted, but authenticated metadata.
+
+**Key Security Context (Improvements over JWT):**
+*   **Secure by Default:** Eliminates JWT's most critical vulnerabilities by design.
+*   **Strong Cryptography:**
+    *   **Version 2 (Modern):**
+        *   `local`: XChaCha20-Poly1305 (AEAD).
+        *   `public`: Ed25519 (Edwards-curve Digital Signature Algorithm).
+*   **Forgery is Not Trivial:** Because the algorithm is not specified in a header and all parts are authenticated, it is not possible to tamper with the token's contents or intended cryptographic operations.
+*   **Confidentiality for `local` tokens:** The payload is encrypted, protecting its contents from being read by unauthorized parties.
+
+
+
+
+____________________________________________*****************************__________________________________
+____________________________________________*****************************__________________________________
+____________________________________________*****************************__________________________________
+____________________________________________*****************************__________________________________
+____________________________________________*****************************__________________________________
