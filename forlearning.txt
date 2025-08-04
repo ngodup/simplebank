@@ -701,6 +701,240 @@ Now, let's see how much simpler and safer it is to implement the same interface 
 By using a `Maker` interface, you can now easily switch your application from JWT to the more secure PASETO implementation by changing just one line of code in your dependency injection setup!
 
 ____________________________________________*****************************__________________________________
+
+Lession 23. Implement login user API that returns PASETO or JWT access token in Go
+-------------------------------------------------------------------------------------
+### Tutorial: Implementing a Secure Login API in Go
+
+Welcome to this lesson where we'll build a secure login API for our Simple Bank application. 
+This API will allow users to authenticate using their username and password and, in return, receive an access token. We'll be using PASETO for token generation, which is a secure alternative to JWT.
+
+#### **Step 1: Project Setup and Configuration**
+
+Before we start coding, let's set up our environment and configuration.
+
+1.  **Environment Variables:** We need to add two new environment variables to our `app.env` file:
+
+    *   `TOKEN_SYMMETRIC_KEY`: This is a 32-character secret key used to sign our PASETO tokens. It's crucial that this key is kept secret and is exactly 32 characters long.
+    *   `ACCESS_TOKEN_DURATION`: This defines how long our access tokens will be valid. For security reasons, we'll keep this short, for example, `15m` for 15 minutes.
+
+    Your `app.env` file should look like this:
+
+    ```
+    DB_DRIVER=postgres
+    DB_SOURCE=postgresql://postgres:mysecretpassword@localhost:5432/simple_bank?sslmode=disable
+    SERVER_ADDRESS=0.0.0.0:8080
+    TOKEN_SYMMETRIC_KEY=12345678901234567890123456789012
+    ACCESS_TOKEN_DURATION=15m
+    ```
+
+2.  **Configuration Struct:** Now, let's update our `Config` struct in `util/config.go` to load these new variables:
+
+    ```go
+    package util
+
+    import (
+    	"time"
+
+    	"github.com/spf13/viper"
+    )
+
+    type Config struct {
+    	DBDriver            string        `mapstructure:"DB_DRIVER"`
+    	DBSource            string        `mapstructure:"DB_SOURCE"`
+    	ServerAddress       string        `mapstructure:"SERVER_ADDRESS"`
+    	TokenSymmetricKey   string        `mapstructure:"TOKEN_SYMMETRIC_KEY"`
+    	AccessTokenDuration time.Duration `mapstructure:"ACCESS_TOKEN_DURATION"`
+    }
+
+    // ... (rest of the file)
+    ```
+
+#### **Step 2: Integrating the Token Maker into the API Server**
+
+Next, we'll integrate the token maker into our API server. This will allow us to create and verify tokens.
+
+1.  **Update Server Struct:** In `api/server.go`, add the `token.Maker` and `util.Config` to the `Server` struct:
+
+    ```go
+    package api
+
+    import (
+        // ... other imports
+        "github.com/ngodup/simplebank/token"
+        "github.com/ngodup/simplebank/util"
+    )
+
+    type Server struct {
+        config     util.Config
+        store      db.Store
+        tokenMaker token.Maker
+        router     *gin.Engine
+    }
+    ```
+
+2.  **Update `NewServer` Function:** Modify the `NewServer` function to create and initialize the token maker:
+
+    ```go
+    func NewServer(config util.Config, store db.Store) (*Server, error) {
+        tokenMaker, err := token.NewPasetoMaker(config.TokenSymmetricKey)
+        if err != nil {
+            return nil, fmt.Errorf("cannot create token maker: %w", err)
+        }
+
+        server := &Server{
+            config:     config,
+            store:      store,
+            tokenMaker: tokenMaker,
+        }
+
+        // ... (rest of the function)
+    }
+    ```
+
+3.  **Update `main.go`:** We need to pass the configuration to the `NewServer` function in `main.go`:
+
+    ```go
+    func main() {
+        config, err := util.LoadConfig(".")
+        if err != nil {
+            log.Fatal("cannot load config:", err)
+        }
+
+        // ... (database connection)
+
+        store := db.NewStore(conn)
+        server, err := api.NewServer(config, store)
+        if err != nil {
+            log.Fatal("cannot create server:", err)
+        }
+
+        // ... (start server)
+    }
+    ```
+
+#### **Step 3: Implementing the Login API Handler**
+
+Now for the core of our lesson: implementing the login API handler.
+
+1.  **Request and Response Structs:** In `api/user.go`, define the request and response structs for our login API:
+
+    ```go
+    type loginUserRequest struct {
+        Username string `json:"username" binding:"required,alphanum"`
+        Password string `json:"password" binding:"required,min=6"`
+    }
+
+    type loginUserResponse struct {
+        AccessToken string       `json:"access_token"`
+        User        userResponse `json:"user"`
+    }
+    ```
+
+2.  **`loginUser` Handler:** Create the `loginUser` handler function in `api/user.go`:
+
+    ```go
+    func (server *Server) loginUser(ctx *gin.Context) {
+        var req loginUserRequest
+        if err := ctx.ShouldBindJSON(&req); err != nil {
+            ctx.JSON(http.StatusBadRequest, errorResponse(err))
+            return
+        }
+
+        user, err := server.store.GetUser(ctx, req.Username)
+        if err != nil {
+            if err == sql.ErrNoRows {
+                ctx.JSON(http.StatusNotFound, errorResponse(err))
+                return
+            }
+            ctx.JSON(http.StatusInternalServerError, errorResponse(err))
+            return
+        }
+
+        err = util.CheckPassword(req.Password, user.HashedPassword)
+        if err != nil {
+            ctx.JSON(http.StatusUnauthorized, errorResponse(err))
+            return
+        }
+
+        accessToken, err := server.tokenMaker.CreateToken(user.Username, server.config.AccessTokenDuration)
+        if err != nil {
+            ctx.JSON(http.StatusInternalServerError, errorResponse(err))
+            return
+        }
+
+        rsp := loginUserResponse{
+            AccessToken: accessToken,
+            User:        newUserResponse(user),
+        }
+
+        ctx.JSON(http.StatusOK, rsp)
+    }
+    ```
+
+3.  **Refactor `userResponse`:** To avoid exposing the user's hashed password, we'll create a `newUserResponse` function that maps the `db.User` to a `userResponse` struct:
+
+    ```go
+    type userResponse struct {
+        Username          string    `json:"username"`
+        FullName          string    `json:"full_name"`
+        Email             string    `json:"email"`
+        PasswordChangedAt time.Time `json:"password_changed_at"`
+        CreatedAt         time.Time `json:"created_at"`
+    }
+
+    func newUserResponse(user db.User) userResponse {
+        return userResponse{
+            Username:          user.Username,
+            FullName:          user.FullName,
+            Email:             user.Email,
+            PasswordChangedAt: user.PasswordChangeAt,
+            CreatedAt:         user.CreatedAt,
+        }
+    }
+    ```
+
+#### **Step 4: Routing and Testing**
+
+Finally, let's add the new route to our server and update our tests.
+
+1.  **Add Route:** In `api/server.go`, add the login route to the `setupRouter` function:
+
+    ```go
+    func (server *Server) setupRouter() {
+        router := gin.Default()
+        router.POST("/users", server.createUser)
+        router.POST("/users/login", server.loginUser)
+
+        // ... (other routes)
+
+        server.router = router
+    }
+    ```
+
+2.  **Update Tests:** We need to update our tests to use the new `NewServer` function that takes a `config` object. In `api/main_test.go`, create a `newTestServer` helper function:
+
+    ```go
+    func newTestServer(t *testing.T, store db.Store) *Server {
+        config := util.Config{
+            TokenSymmetricKey:   util.RandomString(32),
+            AccessTokenDuration: time.Minute,
+        }
+        server, err := NewServer(config, store)
+        require.NoError(t, err)
+
+        return server
+    }
+    ```
+
+    Now, in your test files (`account_test.go`, `user_test.go`, etc.), replace `api.NewServer(store)` with `newTestServer(t, store)`.
+
+Congratulations! You have successfully implemented a secure login API in Go. You can now run the server and test the login functionality using a tool like Postman.
+
+
 ____________________________________________*****************************__________________________________
+Lession 24. Implement login user API that returns PASETO or JWT access token in Go
+-------------------------------------------------------------------------------------
+
 ____________________________________________*****************************__________________________________
 ____________________________________________*****************************__________________________________
