@@ -935,9 +935,265 @@ Congratulations! You have successfully implemented a secure login API in Go. You
 ____________________________________________*****************************__________________________________
 Lession 24. Implement authentication middleware and authorization rules in Golang using Gin
 --------------------------------------------------------------------------------------------
+# Lesson: Implementing Authentication and Authorization in a Go Web API
 
+Welcome to this lesson on securing your web API. We'll be taking our Simple Bank application and adding a crucial layer of security: authentication and authorization. This will ensure that only registered users can access the API and that they can only perform actions on their own accounts.
 
+## Core Problem
 
+The initial API was insecure, allowing unauthorized access to all endpoints. For example, any user could view all bank accounts or transfer money from any account without proper verification.
+
+## Objective
+
+The goal was to secure the API by implementing a bearer token-based authorization system. Protected endpoints should only be accessible with a valid access token, and users should only be able to access or modify resources they own.
+
+---
+
+## Part 1: Authentication Middleware
+
+The first step is to create a middleware that can authenticate incoming requests. A middleware in Gin is a function that is executed before the actual request handler. It can be used to perform common tasks like logging, authentication, and error handling.
+
+### 1.1. The `authMiddleware` Function
+
+We'll create a new file `api/middleware.go` and define our `authMiddleware` function. This function is a higher-order function that takes a `token.Maker` interface and returns a `gin.HandlerFunc`.
+
+**Workflow:**
+
+1.  **Extract Authorization Header:** The middleware first extracts the `Authorization` header from the incoming request.
+2.  **Validate Header Format:** It then checks if the header is in the correct format: `Bearer <access_token>`.
+3.  **Verify Token:** If the format is correct, the middleware extracts the access token and uses the `token.Maker` to verify it.
+4.  **Handle Invalid Tokens:** If the token is invalid (e.g., expired, malformed), the middleware aborts the request with a `401 Unauthorized` error.
+5.  **Store Payload:** If the token is valid, its payload (containing user information) is extracted and stored in the Gin context for later use by the API handler.
+6.  **Forward Request:** Finally, the middleware calls `ctx.Next()` to pass the request to the actual API handler.
+
+Here's the implementation in `api/middleware.go`:
+
+```go
+package api
+
+import (
+	"errors"
+	"net/http"
+	"strings"
+
+	"github.com/gin-gonic/gin"
+	"github.com/ngoddup/simplebank/token"
+)
+
+const (
+	authorizationHeaderKey  = "authorization"
+	authorizationTypeBearer = "bearer"
+	authorizationPayloadKey = "authorization_payload"
+)
+
+// authMiddleware handles authentication and authorization for API requests.
+// It is not a handler but a higher-order function that takes a token.Maker and returns a gin.HandlerFunc.
+func authMiddleware(tokenMaker token.Maker) gin.HandlerFunc {
+	// This anonymous function is the authentication middleware.
+	return func(ctx *gin.Context) {
+		// Step 1: Extract authorization header.
+		authorizationHeader := ctx.GetHeader(authorizationHeaderKey)
+		if len(authorizationHeader) == 0 {
+			err := errors.New("authorization header is not provided")
+			ctx.AbortWithStatusJSON(http.StatusUnauthorized, errorResponse(err))
+			return
+		}
+
+		// Step 2: Check the authorization type. It should be "Bearer".
+		fields := strings.Fields(authorizationHeader)
+		if len(fields) < 2 {
+			err := errors.New("invalid authorization header format")
+			ctx.AbortWithStatusJSON(http.StatusUnauthorized, errorResponse(err))
+			return
+		}
+
+		authorizationType := strings.ToLower(fields[0])
+		if authorizationType != authorizationTypeBearer {
+			err := errors.New("unsupported authorization type " + authorizationType)
+			ctx.AbortWithStatusJSON(http.StatusUnauthorized, errorResponse(err))
+			return
+		}
+
+		// Step 3: Get the access token and verify it.
+		accessToken := fields[1]
+		payload, err := tokenMaker.VerifyToken(accessToken)
+		if err != nil {
+			ctx.AbortWithStatusJSON(http.StatusUnauthorized, errorResponse(err))
+			return
+		}
+
+		// Step 4: Store the payload in the Gin context and pass it to the next handler.
+		ctx.Set(authorizationPayloadKey, payload)
+		ctx.Next()
+	}
+}
+```
+
+### 1.2. Middleware Integration
+
+Now that we have our middleware, we need to integrate it into our server. We'll do this in `api/server.go`.
+
+We'll create a new route group for all routes that require authentication using `router.Group("/")`. Then, we'll apply the `authMiddleware` to this group. This ensures that every request to a route within this group first passes through the authentication check. Public routes like user creation and login will be excluded from this group.
+
+```go
+// api/server.go
+
+func (server *Server) setupRouter() {
+	router := gin.Default()
+	router.POST("/users", server.createUser)
+	router.POST("/users/login", server.loginUser)
+
+	authRoutes := router.Group("/").Use(authMiddleware(server.tokenMaker))
+
+	authRoutes.POST("/accounts", server.createAccount)
+	authRoutes.GET("/accounts/:id", server.getAccount)
+	authRoutes.GET("/accounts", server.listAccounts)
+
+	authRoutes.POST("/transfers", server.createTransfer)
+
+	server.router = router
+}
+```
+
+### 1.3. Testing the Middleware
+
+We need to test our middleware to ensure it behaves as expected. We'll create a new file `api/middleware_test.go` and write unit tests for various scenarios, including:
+
+*   Valid token
+*   Missing header
+*   Unsupported authorization type
+*   Invalid token
+*   Expired token
+
+We'll use a table-driven approach to cover all these cases.
+
+---
+
+## Part 2: Authorization Logic
+
+Now that we have authentication, we need to implement authorization. Authentication verifies the user's identity, while authorization checks if the user has permission to perform a specific action.
+
+We'll implement authorization logic within each API handler that requires it.
+
+### 2.1. Retrieving the Authenticated User
+
+In our API handlers, we can now access the authenticated user's data from the Gin context using the `authorizationPayloadKey`.
+
+```go
+authPayload := ctx.MustGet(authorizationPayloadKey).(*token.Payload)
+```
+
+### 2.2. Implementing Authorization Rules
+
+Now, we'll implement the authorization rules in our API handlers.
+
+*   **Create Account:** The account `owner` is automatically set to the authenticated user's username.
+
+    ```go
+    // api/account.go
+
+    func (server *Server) createAccount(ctx *gin.Context) {
+        // ...
+        authPayload := ctx.MustGet(authorizationPayloadKey).(*token.Payload)
+        arg := db.CreateAccountParams{
+            Owner:    authPayload.Username,
+            Currency: req.Currency,
+            Balance:  0,
+        }
+        // ...
+    }
+    ```
+
+*   **Get Account:** The API now checks if the requested account's owner matches the authenticated user.
+
+    ```go
+    // api/account.go
+
+    func (server *Server) getAccount(ctx *gin.Context) {
+        // ...
+        account, err := server.store.GetAccount(ctx, req.ID)
+        // ...
+        authPayload := ctx.MustGet(authorizationPayloadKey).(*token.Payload)
+        if account.Owner != authPayload.Username {
+            err := errors.New("account doesn't belong to the authenticated user")
+            ctx.JSON(http.StatusUnauthorized, errorResponse(err))
+            return
+        }
+        // ...
+    }
+    ```
+
+*   **Transfer Money:** The API verifies that the `from_account` in a transfer request belongs to the authenticated user, preventing them from spending other users' money.
+
+    ```go
+    // api/transfer.go
+
+    func (server *Server) createTransfer(ctx *gin.Context) {
+        // ...
+        fromAccount, valid := server.validAccount(ctx, req.FromAccountID, req.Currency)
+        if !valid {
+            return
+        }
+
+        authPayload := ctx.MustGet(authorizationPayloadKey).(*token.Payload)
+        if fromAccount.Owner != authPayload.Username {
+            err := fmt.Errorf("from account [%d] doesn't belong to the authenticated user", fromAccount.ID)
+            ctx.JSON(http.StatusUnauthorized, errorResponse(err))
+            return
+        }
+        // ...
+    }
+    ```
+
+### 2.3. Updating Database Queries
+
+To get a list of accounts that belong to a particular owner, we need to add a `WHERE` clause to our `ListAccounts` query in `db/query/account.sql`.
+
+```sql
+-- name: ListAccounts :many
+SELECT * FROM accounts
+WHERE owner = $1
+ORDER BY id
+LIMIT $2
+OFFSET $3;
+```
+
+After modifying the SQL query, we need to run `make sqlc` and `make mock` to regenerate the Go code and mocks.
+
+---
+
+## Part 3: Testing Secured Endpoints
+
+Now that our endpoints are secured, our existing API tests will fail because they don't include an authorization header. We need to update our tests to include a valid `Authorization` header in the requests.
+
+We can create a helper function to add the authorization header to the request.
+
+```go
+// api/main_test.go
+
+func addAuthorization(
+	t *testing.T,
+	request *http.Request,
+	tokenMaker token.Maker,
+	authorizationType string,
+	username string,
+	duration time.Duration,
+) {
+	token, err := tokenMaker.CreateToken(username, duration)
+	require.NoError(t, err)
+
+	authorizationHeader := fmt.Sprintf("%s %s", authorizationType, token)
+	request.Header.Set(authorizationHeaderKey, authorizationHeader)
+}
+```
+
+Now, we can use this helper function in our API tests to add the authorization header to the requests.
+
+---
+
+## Conclusion
+
+In this lesson, we've successfully secured our Simple Bank API by implementing a robust authentication middleware and API-specific authorization rules. This ensures that only authenticated users can access the API and that they can only perform actions on their own accounts. This is a critical step in building a secure and reliable application.
 
 ____________________________________________*****************************__________________________________
 ____________________________________________*****************************__________________________________

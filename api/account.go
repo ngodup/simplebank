@@ -22,7 +22,7 @@ func (server *Server) createAccount(ctx *gin.Context) {
 		return
 	}
 
-	// get the user from the context
+	// get the authorization payload from the context
 	authPayload := ctx.MustGet(authorizationPayloadKey).(*token.Payload)
 	arg := db.CreateAccountParams{
 		Owner:    authPayload.Username,
@@ -68,7 +68,7 @@ func (server *Server) getAccount(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
 		return
 	}
-	// get the user from the context
+	// get the authentication payload from the context
 	authPayload := ctx.MustGet(authorizationPayloadKey).(*token.Payload)
 	// check if the account owner is the same as the authenticated user
 	if account.Owner != authPayload.Username {

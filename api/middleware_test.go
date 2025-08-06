@@ -37,8 +37,8 @@ func TestAuthMiddleware(t *testing.T) {
 	// Step 1: List all the test cases
 	testCases := []struct {
 		name          string
-		setupAuth     func(t *testing.T, request *http.Request, tokenMaker token.Maker)
-		checkResponse func(t *testing.T, recorder *httptest.ResponseRecorder)
+		setupAuth     func(t *testing.T, request *http.Request, tokenMaker token.Maker) //Setup authorization header to HTTP request
+		checkResponse func(t *testing.T, recorder *httptest.ResponseRecorder)           //Check response code
 	}{
 		//Add test cases
 		{
@@ -55,7 +55,7 @@ func TestAuthMiddleware(t *testing.T) {
 			setupAuth: func(t *testing.T, request *http.Request, tokenMaker token.Maker) {
 			},
 			checkResponse: func(t *testing.T, recorder *httptest.ResponseRecorder) {
-				require.Equal(t, http.StatusUnauthorized, recorder.Code)
+				require.Equal(t, http.StatusUnauthorized, recorder.Code) //check status code is 401
 			},
 		},
 		{
@@ -99,11 +99,11 @@ func TestAuthMiddleware(t *testing.T) {
 			server.router.GET(
 				authPath,
 				authMiddleware(server.tokenMaker),
-				func(ctx *gin.Context) {
+				func(ctx *gin.Context) { //handler function
 					ctx.JSON(http.StatusOK, gin.H{})
 				})
 
-			//Send request tho above api
+			//Send request this api route and create test recorder
 			recorder := httptest.NewRecorder()
 			request, err := http.NewRequest(http.MethodGet, authPath, nil)
 			require.NoError(t, err)

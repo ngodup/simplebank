@@ -18,21 +18,20 @@ type transferRequest struct {
 }
 
 func (server *Server) createTransfer(ctx *gin.Context) {
-
 	var req transferRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, errorResponse(err))
 		return
 	}
-	//Only need fromAccount to check authorization logic
+
 	fromAccount, valid := server.validAccount(ctx, req.FromAccountID, req.Currency)
 	if !valid {
 		return
 	}
+
 	authPayload := ctx.MustGet(authorizationPayloadKey).(*token.Payload)
-	//check if the fromAccount owner is the same as the authenticated user
 	if fromAccount.Owner != authPayload.Username {
-		err := fmt.Errorf("from account doesn't belong to the authenticated user")
+		err := fmt.Errorf("from account [%d] doesn't belong to the authenticated user", fromAccount.ID)
 		ctx.JSON(http.StatusUnauthorized, errorResponse(err))
 		return
 	}
@@ -55,10 +54,8 @@ func (server *Server) createTransfer(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, result)
-
 }
 
-// validAccount checks if account exists and currency is the same
 func (server *Server) validAccount(ctx *gin.Context, accountID int64, currency string) (db.Account, bool) {
 	account, err := server.store.GetAccount(ctx, accountID)
 	if err != nil {
@@ -71,7 +68,7 @@ func (server *Server) validAccount(ctx *gin.Context, accountID int64, currency s
 	}
 
 	if account.Currency != currency {
-		err := fmt.Errorf("account [%d] currency mismatch: %s vs %s", accountID, account.Currency, currency)
+		err := fmt.Errorf("account [%d] currency mismatch: %s vs %s", account.ID, account.Currency, currency)
 		ctx.JSON(http.StatusBadRequest, errorResponse(err))
 		return account, false
 	}
