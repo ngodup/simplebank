@@ -76,12 +76,13 @@ func (arg TransferTxParams) toCreateTransferParams() CreateTransferParams {
 // TransferTx performs a money transfer from one account to the other
 // It creates a transfer record, add account entries, and update accounts' balance within a single database transaction
 func (store *SQLStore) TransferTx(ctx context.Context, arg TransferTxParams) (TransferTxResult, error) {
+	//Step 1: create empty transfer record
 	var result TransferTxResult
 
 	err := store.execTx(ctx, func(q *Queries) error {
 		var err error
 
-		//Transfer record
+		//Transfer record is created from one single database transaction
 		result.Transfer, err = q.CreateTransfer(ctx, arg.toCreateTransferParams())
 
 		if err != nil {
