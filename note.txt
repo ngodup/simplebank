@@ -1,235 +1,108 @@
-I previous section we have learned how to build a minimal docker image for our golang application. As image build was very prettty small just 35.3MB.
-And we dont know whether it is working or not, we didnt test it. Let run our previous created docker 
-docker run --name simplebank -p 8080:8080 simplebank:latest                                                                          
-2025/08/09 07:18:22 cannot load config:Config File "app" Not Found in "[/app]"
-
-We got issues config:Config file "app" Not found, this is expected. In one of previous section we used viper to load the app.env confile file in lecture 12. As this file 
-doesnt exist in the docker image we just build before in Lesson 25 simplebank:latest, in previous lession we just copied the binary executable file, but we didn't copy this 
-conifg file to the final run stage image. To fixed the error we need to copy the app.env file to that image as well. Let edit the Dockerfile to add this 
 
 
-#Build stage
-FROM golang:1.24.6-alpine3.22 AS builder
+Your application's `Dockerfile` needs to be modified to include the wait script and a new entrypoint script (`start.sh`).
+
+```dockerfile
+# --- In the final stage of your Dockerfile ---
+
 WORKDIR /app
-COPY . .
-RUN go build -o main main.go
 
-#Run stage
-FROM alpine:3.22
-WORKDIR /app
+# Copy wait script and make it executable
+COPY wait-for.sh .
+RUN chmod +x wait-for.sh
+
+# Copy the startup script
+COPY start.sh .
+
+# Copy migration files
+COPY db/migration ./migration
+
+# Copy the application binary
 COPY --from=builder /app/main .
-#Add this config file
-COPY app.env .
 
+# Expose the application port
 EXPOSE 8080
-CMD ["/app/main"]
 
-This is a config file we used for development, which connect to local Postgres DB, and uses a trivial token symmetric key check app.env
-DB_DRIVER=postgres
-DB_SOURCE=postgresql://postgres:mysecretpassword@localhost:5432/simple_bank?sslmode=disable
-SERVER_ADDRESS=0.0.0.0:8080
-TOKEN_SYMMETRIC_KEY=12345678901234567890123456789012
-ACCESS_TOKEN_DURATION=15m
+# Set the entrypoint to our startup script
+ENTRYPOINT [ "/app/start.sh" ]
 
-this should not be used in production image right?
-
-We will learn how to replace this config file setting with real production config file in anthor lesson ? When we update our CI/CD workflow to automatically build the image for us.
-For now w'll used this development config to test our docker image first. As last docker run failed, now run docker ps - A
-5a7a8dc179b7   simplebank:latest         "/app/main"              11 minutes ago   Exited (1) 11 minutes ago                              simplebank
-
-You can see it left behind an existed simplebank container and we need to remove this container by running
-docker rm simplebank this is our simplebank:latest
-
-Now before we rebuild the docker image and let run docker rmi to remove old simplebank image allows
-docker rmi 6c63c2f2726c this is simplebank:latest
-
-Now let run docker build command to rebuild it 
-docker build -t simplebank:latest .
-
-Now we have latest docker image of simplebank and let run it 
- docker run --name simplebank -p 8080:8080 simplebank:latest
- The golang server is running successful but we see warning the GIN is Running in "debug" mode. Switch to "release" mode in production. In production we need to set this
- GIN_MODE environment variable to release, to instruct gin that it should run the sever in release mode instead. Let do it by removing simplebank container
-
- docker rm simplebank
-
- and start a new one with same docker run command with -e option to set GIN_MODE=release environment
- docker run --name simplebank -p 8080:8080 -e GIN_MODE=release simplebank:latest
-
-We can check docker ps  to verify the new simplebank container works
-
-Calling API calls in Postman got error
--------------------------------------
-
-Now when we used postman to login it say,     "error": "dial tcp [::1]:5432: connect: connection refused". The reason is the server cannot connect to localhost port 5432. 
-Which is the address of our Postgres database. The Problem is that as stated in the app.env config file, weare connecting to the databse via the localhost
-DB_SOURCE=postgresql://postgres:mysecretpassword@localhost:5432/simple_bank?sslmode=disable
-
-Why we cant used localhost to connect to Postgres and Golang container ?
-------------------------------------------------------------------------
-But the simplebank and postgres container are 2 separated container. Actually they dont have the same network IP address. We can inspect the network setting of the postgres that is pg-root-container
-
-docker container inspect pg-root-container
-
-We can se the network setting of our postgress:16 which we use pg-root-container as container and it is running on default bridge network and we can see what IP addrss it is using.
-     "Networks": {
-                "bridge": {
-                         ..
-                    "NetworkID": "c7f8b4366a58cf96b2c0b06f49acdde7b982fb478084f6907b03ff9fa74fb93b",
-                    "EndpointID": "66b5a121a95b8fbbe3cfad5b2182f8a9a03b02e5dcfe4f829f6de31672c2210f",
-                    "Gateway": "172.17.0.1",
-                    "IPAddress": "172.17.0.3",
-and now do the same to check IP address of our golang docker which we had given container name simplebank and we see its IP address  "172.17.0.2"
->docker container inspect simplebank
-
-
-# How to Connect between different Stand-alone Containers - solution
--------------------------------------------------------------------------
-## The Problem: Inter-Container Communication
-When you have multiple services running in separate Docker containers (e.g., an application container and a database container), they often need to communicate with each other. By default, Docker containers are attached to a default bridge network, but this network has limitations, especially when it comes to service discovery.
-This tutorial explains how to connect two or more stand-alone Docker containers using a user-defined network. This allows the containers to communicate with each other using their names, which is a more robust and flexible approach than using IP addresses.
-
-
-
-
-Solution 1: rplace localhost with real IP address of the Postgres16 container in the app.env config file and rebuild the docker image. But this approach is not convenient and not flexiable.
-    This is because we need to rebuild the image every time the IP address of Postgres container pg-root-container
-
-Solution 2: Using container IP address and setting environment variable via image build
-  This is better approach way to change the DB_SOURCE without rebuilding the image. The keep it mind that we are usign viper to read the config, and it has ability to override the config
-  written in app.env file with value we provide via environment variable.
-Let first stop the current simplebank container and remove it and start a new simplebank container for golang gin and this time we will add 1 more environment variable to override the DB_SOURCE
-value with the real IP of the postgres container.
-
- docker run --name simplebank -p 8080:8080 -e GIN_MODE=release -e DB_SOURCE="postgresql://postgres:mysecretpassword@172.17.0.1:5432/simple_bank?sslmode=disable" simplebank:latest
-
-Now accessing or its API call with the postman are successful and we just tried log it work perfectly. Now we know how to connect our container to another stand-alone container via its
-IP address. However, the IP address can change if we restart the container. So using this is also not ideal solution. Let stop the simplebank golang container and remove it.
-
-
-## The Default Bridge Network vs. User-Defined Networks
-
-*   **Default Bridge Network:**
-    *   All containers run on this network by default unless specified otherwise.
-    *   Containers on this network can communicate with each other using their IP addresses.
-    *   **Limitation:** Does not provide automatic DNS resolution between containers. This means you cannot use container names as hostnames for communication.
-
-*   **User-Defined Networks:**
-    *   You can create your own custom bridge networks.
-    *   **Key Advantage:** Provides automatic DNS resolution. Containers on the same user-defined network can resolve each other by their container name.
-    *   Provides better isolation and organization for your containers.
-
-
-Solution 3:  Connecting Containers with a User-Defined Network
-This is better way of connecting to Postgres container without using IP address instead we will used user-defined network. If we run docker network ls.
-ocker network ls
-NETWORK ID     NAME      DRIVER    SCOPE
-c7f8b4366a58   bridge    bridge    local
-ac4c7ce4df5d   host      host      local
-539b4b15aef2   none      null      local
-
-We can see that default bridge netwrok that our simplebank and pg-root-container for postgres were using and we can see more detail by running docker network inspect with passing 
-network namme:bridge 
->docker network inspect bridge
-
-And we can see the list of the containers that are running on this network and right now only postgress pg-root-container is using it as we just remove the simplebank container.
-Normally containers running on same network can discover each other via name instead of IP address. However it doesnt work for the default bridge network. So what we need to do is 
-to create our own network, and put both postgress container and simplebank container on this network and then they would be able to call each other using name.
->docker network --help
-The docker provide several commands to manage networks and let use the docker network create command to create a new network.
->docker network create bank-network
-Then run network connect command to connect the existing posgress container to it.
->docker network connect --help
-We can check and used the syntax for docker network connect
->docker network connect name-of-network
-in our case it is bank-network name-of-container
->docker network connect bank-network pg-root-container
-Now run docker network inspect on bank-network
->docker network inspect bank-network
- 
-Running above command we can see that the postgres16 pg-root-container has been connected to this network. If we inspect the postgress16 container
->docker container inspect pg-root-container
-We can see that it is connect to bank-network has connected to 2 different networks, the bank-network that we've juste created and default bridge network that it was originally connected to.
-
-  "Networks": {
-                "bank-network": {
-It is totally ok for a container to be connected to multiple networks at the same time. Now it is time to recreate the golang simplebank container that will connect to this new network.
-We will used the same docker run command as before and we will add 1 more option : --network and passing the name of the network as below
-
->docker run --name simplebank --network bank-network -p 8080:8080 -e GIN_MODE=release -e DB_SOURCE="postgresql://postgres:mysecretpassword@172.17.0.1:5432/simple_bank?sslmode=disable" simplebank:latest
-This time, the simplebank container will be running on the same network with Postgres that is pg-root-container and it can discover the postgres container address by its name.
-and let replace this IP address with our container name
-
->docker run --name simplebank --network bank-network -p 8080:8080 -e GIN_MODE=release -e DB_SOURCE="postgresql://postgres:mysecretpassword@172.17.0.1:5432/simple_bank?sslmode=disable" simplebank:latest
-
-So repace IP address 172.17.0.1:5432 with container name of postgres
-docker run --name simplebank --network bank-network -p 8080:8080 -e GIN_MODE=release -e DB_SOURCE="postgresql://postgres:mysecretpassword@pg-root-container:5432/simple_bank?sslmode=disable" simplebank:latest
-
-Now we the golang gin web server is now started, and we check by using postman to resend the POST login again. Now the simplebank golang web apps is succesfully connect to postgress container using network name 
-instead of the IP address.
-
-Now when we inspect bank-network we can see the 2 container connecting to it both postgress db and golang web container. Now we have learned how to take Advantage of user-defined network to 
-allow 2 stand-alone container to talk to each other by names.
-At end in our Makefile let update the make postgres command to connect ot bank-network upon creation
->postgres:
-	docker run --name pg-root-container -e POSTGRES_PASSWORD=mysecretpassword -p 5432:5432 -d postgres:16
-to
->postgres:
-	docker run --name pg-root-container --network bank-network -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=mysecretpassword -p 5432:5432 -d postgres:16
-
-At last added and push all the changes to github
-
-
-
->docker network inspect bank-network
-
-### Step 1: Create a User-Defined Network
-
-First, create a new bridge network. It's a good practice to name the network something relevant to your project.
-
-```bash
-docker network create bank-network
+# Provide the default command for the entrypoint
+CMD [ "/app/main" ]
 ```
 
-You can list all Docker networks to see your newly created network:
+#### Step 2: Create the `start.sh` Script
 
-```bash
-docker network ls
+This script will run the database migrations and then execute the main application binary. The `exec "$@"` part is important; it replaces the script process with the command passed as arguments (in our case, `/app/main` from the `CMD` instruction).
+
+```sh
+#!/bin/sh
+
+# Exit immediately if a command exits with a non-zero status.
+set -e
+
+# Run database migrations
+/app/migrate -path /app/migration -database "$DB_SOURCE" -verbose up
+
+# Execute the command passed to the script
+echo "Starting the application..."
+exec "$@"
 ```
 
-### Step 2: Connect an Existing Container to the Network
+#### Step 3: Update `docker-compose.yaml` to Use the Wait Script
 
-If you have a container that is already running (like a database), you can connect it to your new network.
+Finally, we override the `entrypoint` in our `docker-compose.yaml` to orchestrate the waiting.
 
-```bash
-docker network connect bank-network postgres12
+```yaml
+version: "3.9"
+services:
+  postgres:
+    # ... (same as before)
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_SOURCE=postgresql://root:secret@postgres:5432/simple_bank?sslmode=disable
+    depends_on:
+      - postgres
+    entrypoint: [ "/app/wait-for.sh", "postgres:5432", "--", "/app/start.sh" ]
+    command: [ "/app/main" ]
 ```
 
-Now, the `postgres12` container is connected to both the default bridge network and the `bank-network`. A container can be attached to multiple networks simultaneously.
+### Entrypoint and Command Explained:
 
-### Step 3: Run a New Container on the Network
+1.  **`depends_on`**: We still include this for clarity and to ensure the container start order is correct.
+2.  **`entrypoint`**: This overrides the `ENTRYPOINT` in the `Dockerfile`.
+    *   `/app/wait-for.sh`: The script to run.
+    *   `postgres:5432`: The host and port it should wait for.
+    *   `--`: A separator that tells `wait-for.sh` that the subsequent arguments are the command to execute after the wait is over.
+    *   `/app/start.sh`: The script to run once `postgres:5432` is accessible.
+3.  **`command`**: When you override the `entrypoint` in `docker-compose.yaml`, the `CMD` from the `Dockerfile` is ignored. You must provide the `command` here explicitly. This command (`/app/main`) is passed as an argument to the entrypoint script (`start.sh`).
 
-When you start a new container, you can attach it to your network using the `--network` flag.
+## 5. Running the Application
 
-```bash
-docker run --name simplebank --network bank-network -p 8080:8080 -e GIN_MODE=release -e DB_SOURCE="postgresql://root:secret@postgres12:5432/simple_bank?sslmode=disable" simplebank:latest
-```
+With the files in place, you can now manage your application with these commands:
 
-**Key Changes in the `docker run` command:**
+*   **Start the services:**
+    ```sh
+    docker compose up
+    ```
+    (Add `-d` to run in detached mode).
 
-*   `--network bank-network`: This tells Docker to attach the `simplebank` container to the `bank-network`.
-*   `DB_SOURCE="...postgres12..."`: The database connection string now uses the container name `postgres12` as the hostname. Because both `simplebank` and `postgres12` are on the same user-defined network, the `simplebank` container can resolve the IP address of `postgres12` using its name.
+*   **Stop and remove containers, networks, and volumes:**
+    ```sh
+    docker compose down
+    ```
 
-### Step 4: Verify the Connection
+*   **Force a rebuild of the images before starting:**
+    ```sh
+    docker compose up --build
+    ```
 
-You can inspect the network to see which containers are connected to it.
+Now, when you run `docker compose up`, the `api` service will wait for the `postgres` service to be ready, then run migrations, and finally start the application server, preventing any race conditions.
 
-```bash
-docker network inspect bank-network
-```
 
-In the output, you will see a "Containers" section listing both the `simplebank` and `postgres12` containers, along with their network-specific configurations.
 
-## Conclusion
-
-Using user-defined networks is the standard and recommended way to handle communication between Docker containers. It provides a flexible and robust solution by allowing containers to discover and communicate with each other using their names, which is essential for building scalable and maintainable microservices-based applications. For more complex applications, consider using Docker Compose, which allows you to define and manage multi-container applications, including their networks, in a single configuration file.
